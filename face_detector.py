@@ -1,40 +1,36 @@
 import cv2
+import mediapipe as mp
 
-# 1. Load the Haar Cascade face classifier
-face_cascade = cv2.CascadeClassifier(
-    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-)
+# Initialize MediaPipe Face Detection components
+mp_face_detection = mp.solutions.face_detection
+mp_drawing = mp.solutions.drawing_utils
 
-# 2. Initialize the webcam (0 is usually the built-in camera)
+# Open webcam
 cap = cv2.VideoCapture(0)
 
-while True:
-    # Read a frame from the webcam
-    ret, frame = cap.read()
+with mp_face_detection.FaceDetection(
+    model_selection=0, min_detection_confidence=0.5
+) as face_detection:
+  while cap.isOpened():
+    success, frame = cap.read()
+    if not success:
+      print("Ignoring empty camera frame.")
+      continue
 
-    if not ret:
-        print("Failed to grab frame.")
-        break
+    # MediaPipe expects RGB images, OpenCV captures BGR
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = face_detection.process(rgb_frame)
 
-    # Convert the frame to grayscale (haar cascades work best on grayscale)
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    # Draw the face detections on the image
+    if results.detections:
+      for detection in results.detections:
+        mp_drawing.draw_detection(frame, detection)
 
-    # Detect faces in the frame
-    faces = face_cascade.detectMultiScale(
-        gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)
-    )
+    # Display the resulting frame
+    cv2.imshow("MediaPipe Face Detector", frame)
 
-    # Draw a rectangle around every detected face
-    for x, y, w, h in faces:
-        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+    if cv2.waitKey(5) & 0xFF == ord("q"):
+      break
 
-    # Display the resulting frame in a window
-    cv2.imshow("1 AM Face Detector", frame)
-
-    # Press 'q' to exit the loop
-    if cv2.waitKey(1) & 0xFF == ord("q"):
-        break
-
-# Clean up: release the camera and close all OpenCV windows
 cap.release()
 cv2.destroyAllWindows()
