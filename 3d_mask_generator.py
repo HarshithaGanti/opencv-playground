@@ -18,41 +18,69 @@ with mp_face_mesh.FaceMesh(
     if not success:
       break
 
-    # Mirror flip & color conversion
+    # Mirror flip & BGR to RGB
     frame = cv2.flip(frame, 1)
     h, w, _ = frame.shape
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
     results = face_mesh.process(rgb_frame)
+    overlay = frame.copy()
 
     if results.multi_face_landmarks:
       for face_landmarks in results.multi_face_landmarks:
         landmarks = face_landmarks.landmark
+        points_2d = []
+        points_z = []
 
-        # Loop through every connection in the tessellation mesh
-        for connection in mp_face_mesh.FACEMESH_TESSELATION:
-          idx1, idx2 = connection
+        # Extract pixel coordinates and z-depth for all landmarks
+        for lm in landmarks:
+          px, py = int(lm.x * w), int(lm.y * h)
+          points_2d.append((px, py))
+          points_z.append(lm.z)
 
-          pt1 = landmarks[idx1]
-          pt2 = landmarks[idx2]
+        # Set up OpenCV Subdiv2D for Delaunay triangulation over the face bounding rect
+        rect = (0, 0, w, h)
+        subdiv = cv2.Subdiv2D(rect)
 
-          # Convert normalized coordinates (0.0 to 1.0) to actual pixel values
-          x1, y1 = int(pt1.x * w), int(pt1.y * h)
-          x2, y2 = int(pt2.x * w), int(pt2.y * h)
+        # Insert points into the subdivder (filter out duplicates if any)
+        for p in points_2d:
+          subdiv.insert(p)
 
-          # Get the average z depth of the two points
-          avg_z = (pt1.z + pt2.z) / 2.0
+        # Get triangle list
+        triangle_list = subdiv.getTriangleList()
 
-          # Map the z value to a brightness factor and cast to native Python int
-          brightness = int(np.clip((-avg_z + 0.05) * 1500, 20, 255))
+        for t in triangle_list:
+          pt1 = (int(t[0]), int(t[1]))
+          pt2 = (int(t[2]), int(t[3]))
+          pt3 = (int(t[4]), int(t[5]))
 
-          # Create a custom color tuple using standard Python ints
-          color = (brightness, 255 - brightness, brightness)
+          # Ensure the triangle is actually inside the frame boundaries
+          if (
+              0 <= pt1[0] < w
+              and 0 <= pt1[1] < h
+              and 0 <= pt2[0] < w
+              and 0 <= pt2[1] < h
+              and 0 <= pt3[0] < w
+              and 0 <= pt3[1] < h
+          ):
 
-          # Draw the individual line segment
-          cv2.line(frame, (x1, y1), (x2, y2), color, 1)
+            triangle_vertices = np.array([pt1, pt2, pt3], np.int32)
 
-    cv2.imshow("3D Shaded Face Mask", frame)
+            # Approximate depth shading by picking a default medium depth or matching nearby points
+            # For a smooth look, we use a constant neon cyber tone or standard shading
+            color = (150, 255, 100)  # Neon green-cyan matrix vibe
+
+            # Fill the convex polygon triangle
+            cv2.fillConvexPoly(overlay, triangle_vertices, color)
+
+            # Optional: draw fine dark borders around triangles for definition
+            cv2.polylines(overlay, [triangle_vertices], True, (0, 0, 0), 1)
+
+    # Blend the overlay with transparency
+    alpha = 0.5
+    cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+
+    cv2.imshow("Low-Poly Solid 3D Face Mask", frame)
 
     if cv2.waitKey(5) & 0xFF == ord("q"):
       break
